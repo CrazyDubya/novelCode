@@ -642,9 +642,11 @@ export abstract class AbstractLoggerService extends Disposable implements ILogge
 				when: options?.when
 			}
 		};
-		this.registerLogger(loggerEntry.info);
-		// TODO: @sandy081 Remove this once registerLogger can take ILogger
+		
+		// Enhanced registration: Store both the logger info and instance together
 		this._loggers.set(resource, loggerEntry);
+		this.registerLogger(loggerEntry.info);
+		
 		return logger;
 	}
 

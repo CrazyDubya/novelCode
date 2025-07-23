@@ -19,6 +19,7 @@ import { FileOperation, IFileService } from '../../files/common/files.js';
 import { ILogService } from '../../log/common/log.js';
 import { Registry } from '../../registry/common/platform.js';
 import { Workspace } from '../../workspace/common/workspace.js';
+import { CachedFileSystemUtils } from '../../../base/node/cachedFileSystem.js';
 
 function freeze<T>(data: T): T {
 	return Object.isFrozen(data) ? data : objects.deepFreeze(data);
@@ -505,17 +506,35 @@ export class UserSettings extends Disposable {
 		this._register(this.fileService.watch(extUri.dirname(this.userSettingsResource)));
 		// Also listen to the resource incase the resource is a symlink - https://github.com/microsoft/vscode/issues/118134
 		this._register(this.fileService.watch(this.userSettingsResource));
+		
+		// Enhanced file watching with cache invalidation
 		this._register(Event.any(
 			Event.filter(this.fileService.onDidFilesChange, e => e.contains(this.userSettingsResource)),
 			Event.filter(this.fileService.onDidRunOperation, e => (e.isOperation(FileOperation.CREATE) || e.isOperation(FileOperation.COPY) || e.isOperation(FileOperation.DELETE) || e.isOperation(FileOperation.WRITE)) && extUri.isEqual(e.resource, userSettingsResource))
-		)(() => this._onDidChange.fire()));
+		)(() => {
+			// Invalidate cache when configuration files change
+			CachedFileSystemUtils.watchConfigFile(this.userSettingsResource.fsPath);
+			this._onDidChange.fire();
+		}));
 	}
 
 	async loadConfiguration(): Promise<ConfigurationModel> {
 		try {
-			const content = await this.fileService.readFile(this.userSettingsResource);
-			this.parser.parse(content.value.toString() || '{}', this.parseOptions);
-			return this.parser.configurationModel;
+			// Enhanced configuration loading with intelligent caching
+			// First try cached file system for better performance
+			const cachedResult = await CachedFileSystemUtils.readConfigFile(this.userSettingsResource.fsPath);
+			
+			if (cachedResult.isOk) {
+				// Successfully read from cache or disk
+				this.parser.parse(cachedResult.value || '{}', this.parseOptions);
+				return this.parser.configurationModel;
+			} else {
+				// Fallback to original file service if cached read fails
+				this.logService.warn('Cached configuration read failed, falling back to file service', cachedResult.error);
+				const content = await this.fileService.readFile(this.userSettingsResource);
+				this.parser.parse(content.value.toString() || '{}', this.parseOptions);
+				return this.parser.configurationModel;
+			}
 		} catch (e) {
 			return ConfigurationModel.createEmptyModel(this.logService);
 		}
