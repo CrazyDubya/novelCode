@@ -17,7 +17,6 @@ const connectionTokenRegex = /^[0-9A-Za-z_-]+$/;
 
 export const enum ServerConnectionTokenType {
 	None,
-	Optional,// TODO: Remove this soon
 	Mandatory
 }
 
